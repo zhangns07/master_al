@@ -1,10 +1,9 @@
 library(optparse)
 option_list <- list(#make_option(c("-s","--seed"), type="character", default=NULL, help="Initial labeled samples"), # remove seed for master
-                    make_option(c("-c","--cost"), type="numeric", default=0.3, help="Cost for requesting label"),
                     make_option(c("-b","--budget"), type="numeric",default=Inf,help="file with unlabeled data"),
                     make_option(c("-m","--minus1"), type="logical", default=TRUE, help="interpret 0 as -1"),
                     make_option(c("-H","--host"), type="character", default="localhost",help="the machine VW is running on"),
-                    make_option(c("-p","--port_range"), type="character", default=NULL,help="a-b: the range of the port VW is listening on"),
+                    make_option(c("-p","--port_range"), type="character", default="6666-6669",help="a-b: the range of the port VW is listening on"),
                     make_option(c("-u","--unlabeled_dataset"), type="character",default="/home/nz695/vw/rcv1/unlabel.dat",help="file with unlabeled data"),
                     make_option(c("-i","--meta_file"), type="character",default="/home/nz695/vw/rcv1/meta.dat",help="file with meta information: region indicator and labels")
                     )
@@ -19,14 +18,11 @@ for(port in c(min_port:max_port)){
     assign(paste0('con',port),
            socketConnection(host=opt$host, port = port, blocking=TRUE, server=FALSE, open="r+"))
 }
-cat(paste0('connecting to ',opt$host,":",opt$port_range,'...\n'))
-cat('done\n')
 
 # Read unlabeled samples and meta information
 num_unlabel <- as.numeric(strsplit(system(paste0("wc -l ",opt$unlabeled_dataset),intern=TRUE)," ")[[1]][1])
 input_file <- file(opt$unlabeled_dataset,"r")
 meta_info <- read.table(opt$meta_file,sep=",") # first column: region, second column: label
-
 
 # Check num_slaves is same as num_regions
 num_slaves <- max_port-min_port+1
@@ -41,31 +37,15 @@ if (opt$minus1){ y <- meta_info[,2]; y[y==0] <- -1; meta_info[,2] <- y }
 cat('sending unlabeled examples ...\n')
 set.seed(0)
 
-# -- warmup
+# -- warmup per region
 num_warmup <- 5
-
-# -- policy set
-num_policy <- 100
-policy_set <- 2^seq(-9,0,length.out=num_policy)
-
-# -- learning rate
-gamma <- 0.1
-
-# -- book keeping
-cum_samples <- cum_accepts  <- rep(0.5, num_slaves) # incoming unlabeled; passed on to slave; 
-cum_labels <- rep(0, num_slaves)
-exp4_w <- rep(1, num_policy)
-
-p_k <- cum_samples/sum(cum_samples)
-reg_k <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
-objs <- p_k * reg_k 
+cum_labels <- rep(0,num_slaves)
 
 for (i in c(1:num_unlabel)){
     k <- meta_info[i,1]; port <- k-1 + min_port
     y_t <- meta_info[i,2]; 
     x_t <- readLines(input_file,n=1)
     currcon <- get(paste0('con',port))
-    cum_samples[k] <- cum_samples[k]+1
 
     if (sum(cum_labels) > opt$budget){ break }
     if (cum_labels[k] < num_warmup){
@@ -75,54 +55,28 @@ for (i in c(1:num_unlabel)){
         write_resp <- writeLines(labeled_example, currcon)
         response <- readLines(currcon,1)
     } else {
-        # Expert advice
-        advice_t <- as.numeric(objs[k] > policy_set)
+        # Pass unlabeled sample to slave
+        cat(paste0('sending unlabeled ',substr(x_t,1,20),'\n'))
+        write_resp <- writeLines(x_t, currcon)
+        response <- readLines(currcon,1)
+        responselist <- strsplit(response, ' ')[[1]]
+        if (length(responselist)==3){ 
+            # Slave request label
+            cum_labels[k] <- cum_labels[k]+1
+            prediction <- responselist[1]
+            tag <- responselist[2]
+            if (tag == ''){tag <- "'empty"}
+            importance <- responselist[3]
 
-        # Vote
-        pass_prob <- (1-gamma)*sum(exp4_w * advice_t)/sum(exp4_w) + gamma/2
-        action_t <- runif(1) < pass_prob
-
-        # Take action
-        if (action_t){
-            cum_accepts[k] <- cum_accepts[k]+1
-
-            # Pass unlabeled sample to slave
-            #cat(paste0('sending unlabeled ',substr(x_t,1,20),'\n'))
-            write_resp <- writeLines(x_t, currcon)
+            # Pass labeled sample to slave
+            rest <- strsplit(x_t,'\\|')[[1]][2]
+            labeled_example <- paste0(y_t,' ',importance,' ',tag,' |',rest)
+            write_resp <- writeLines(labeled_example, currcon)
             response <- readLines(currcon,1)
-            responselist <- strsplit(response, ' ')[[1]]
-            if (length(responselist)==3){ 
-                # Slave request label
-                cum_labels[k] <- cum_labels[k]+1
-                prediction <- responselist[1]
-                tag <- responselist[2]
-                if (tag == ''){tag <- "'empty"}
-                importance <- responselist[3]
-
-                # Pass labeled sample to slave
-                rest <- strsplit(x_t,'\\|')[[1]][2]
-                labeled_example <- paste0(y_t,' ',importance,' ',tag,' |',rest)
-                write_resp <- writeLines(labeled_example, currcon)
-                response <- readLines(currcon,1)
-            }
-        } 
-
-        # Reward
-        p_tmp <- cum_samples/sum(cum_samples)
-        reg_tmp <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
-        obj_tmp <- p_tmp * reg_tmp + (opt$cost/num_unlabel) * pmax(0,cum_labels-num_warmup)
-        reward_t <-  sum(objs) - sum(obj_tmp)
-        reward_t_policy <- rep(reward_t/pass_prob, num_policy); 
-        reward_t_policy[advice_t != as.numeric(action_t)] <- 0
-
-        # Make EXP4 updates
-        exp4_w <- exp4_w * exp(gamma*reward_t_policy/2)
-
-        # Update current objective value at each region
-        objs <- obj_tmp
+        }
     }
-
 }
+
 
 for(port in c(min_port:max_port)){
     currcon <- get(paste0('con',port))
