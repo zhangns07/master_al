@@ -55,7 +55,8 @@ for (rep in c(1:20)){
 
     # -- take first 50 and get h0
     model_lr <- glm.fit(trainX[1:n_warmup,],0.5+0.5*trainy[1:n_warmup],family=binomial(link='logit'))
-    h0 <- model_lr$coefficients; h0 <- h0/sqrt(sum(h0^2))
+    h0 <- model_lr$coefficients; 
+    h0[is.na(h0)] <- 0; h0 <- h0/sqrt(sum(h0^2))
 
     # -- sample hypotheses not too far away from h0
     scales <- 2^seq(0,FLAGS$lognorm,1)
