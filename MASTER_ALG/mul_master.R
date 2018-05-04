@@ -81,7 +81,6 @@ for (rep in c(1:20)){
     checkpoint <- min(100,floor(nT / (100*10)) * 100)
     if (checkpoint==0){checkpoint <- 25}
 
-    RET_iwal <- matrix(c(0),ncol = 7) # book keeping
     OTB_iwal <- matrix(c(0),ncol = 4) # book keeping
     last_i <- 0
     last_cum_label <- 0
@@ -148,7 +147,6 @@ for (rep in c(1:20)){
             last_cum_label <- CUM_LABELS
             cat('num of rounds:',i, ', num of labels:',CUM_LABELS, '\n')
 
-            RET_iwal <- rbind(RET_iwal,c(i,CUM_LABELS,It, p_t,cum_loss_al ,cum_loss_misclass, cum_loss_logistic))
             opt_Its <- rep(0,r_per_h)
             for(r in c(1:r_per_h)){ opt_Its[r] <- (seq_len(nh)[Ht[,r]])[which.min((cum_loss[,r])[Ht[,r]])] }
             curr_otb <- mul_otb(testX, testy, all_h, testk, opt_Its)
@@ -168,10 +166,6 @@ for (rep in c(1:20)){
     opt2$help <- NULL
     opt2$out_directory <- NULL
     basefilename <- paste0(paste0(names(opt2),'_',opt2), collapse = '_')
-
-    filename <- paste0(FLAGS$out_directory,'/',basefilename, '_rep',rep,'.csv')
-    colnames(RET_iwal) <- c('round','labels','It','pt','cum_loss_al','cum_loss_misclass','cum_loss_logistic')
-    write.table(RET_iwal,filename, sep = ',', row.names = FALSE)
 
     filename <- paste0(FLAGS$out_directory,'/',basefilename, '_otb_rep',rep,'.csv')
     colnames(OTB_iwal) <- c('round','labels','loss_misclass','loss_logistic')

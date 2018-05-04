@@ -73,7 +73,6 @@ for (rep in c(1:20)){
 
     cum_loss <- rep(0,nrow=nh)
     Ht <- rep(TRUE,nh)
-    RET_iwal <- matrix(c(0),ncol = 7) # book keeping
     OTB_iwal <- matrix(c(0),ncol = 4) # book keeping
     last_i <- 0
     last_cum_label <- 0
@@ -105,13 +104,8 @@ for (rep in c(1:20)){
         if (i!= last_i & cum_label != last_cum_label & (i %% checkpoint ==0 || cum_label %% checkpoint == 0)){
             last_i <-  i
             last_cum_label <- cum_label
-            cat('num of rounds:',i,
-                ', num of labels:',cum_label,
-                ', expert:',It,
-                ', misclass_loss/i:', cum_loss_misclass/i,
-                ', logistic_loss/i:', cum_loss_logistic/i,'\n')
+            cat('num of rounds:',i, ', num of labels:',cum_label, '\n')
 
-            RET_iwal <- rbind(RET_iwal,c(i,cum_label,It, p_t,cum_loss_al ,cum_loss_misclass, cum_loss_logistic))
             OTB_iwal <- rbind(OTB_iwal, c(i, cum_label, 
                                 sum(testX %*% all_h[It,] * testy < 0 )/ntest,
                                 sum(log(1+exp(-testX %*% all_h[It,] * testy)))/ntest))
@@ -129,11 +123,6 @@ for (rep in c(1:20)){
     opt2$help <- NULL
     opt2$out_directory <- NULL
     basefilename <- paste0(paste0(names(opt2),'_',opt2), collapse = '_')
-
-    filename <- paste0(FLAGS$out_directory,'/',basefilename, '_rep',rep,'.csv')
-    colnames(RET_iwal) <- c('round','labels','It','pt','cum_loss_al','cum_loss_misclass','cum_loss_logistic')
-    write.table(RET_iwal,filename, sep = ',', row.names = FALSE)
-
 
     colnames(OTB_iwal) <- c('round','labels','loss_misclass','loss_logistic')
     filename <- paste0(FLAGS$out_directory,'/',basefilename, '_otb_rep',rep,'.csv')
