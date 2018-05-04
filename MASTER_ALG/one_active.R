@@ -4,6 +4,7 @@ library(plyr)
 library(mvtnorm)
 library(data.table)
 library(caret)
+library(e1071)
 source('0.init.R')
 option_list <- list(make_option(c("-d", "--dataset"), type="character", default='skin',
                                  help="dataset file name"),
@@ -48,9 +49,12 @@ for (rep in c(1:20)){
 
 
     # take first 50 and train svm
-    model_lr <- glm.fit(trainX[1:n_warmup,],0.5+0.5*trainy[1:n_warmup],family=binomial(link='logit'))
-    h0 <- model_lr$coefficients; 
-    h0[is.na(h0)] <- 0; h0 <- h0/sqrt(sum(h0^2))
+#    model_lr <- glm.fit(trainX[1:n_warmup,],0.5+0.5*trainy[1:n_warmup],family=binomial(link='logit'))
+#    h0 <- model_lr$coefficients; 
+#    h0[is.na(h0)] <- 0; h0 <- h0/sqrt(sum(h0^2))
+
+    model_svm <- svm(trainX[1:n_warmup,], trainy[1:n_warmup], kernel='linear', scale = FALSE)
+    h0 <- t(model_svm$coefs) %*% model_svm$SV
 
     scales <- 2^seq(0,FLAGS$lognorm,1)
     all_h <- gen_all_h(num_dim=ncol(X), num_base_models=FLAGS$basemodel, scales, h0=h0)
