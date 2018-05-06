@@ -91,6 +91,7 @@ for (rep in c(1:20)){
     scales <- 2^seq(0,FLAGS$lognorm,1)
     all_h <- gen_all_h(num_dim=ncol(X), num_base_models=FLAGS$basemodel, scales, h0=h0)
     nh <- nrow(all_h)
+    r_per_h <- 10
 
     # --  When models' norm scales, scales thre as well.
     max_x_norm <- quantile(apply(trainX,1,function(x){sqrt(sum(x^2))}),0.95)
@@ -102,7 +103,6 @@ for (rep in c(1:20)){
     req_prob <- rep(-1,r_per_h)
 
     # -- book keeping
-    r_per_h <- 10
     cum_loss <- matrix(0,nrow=nh,ncol=r_per_h)
     Ht <- matrix(TRUE,nrow=nh,ncol=r_per_h)
     cum_samples <- cum_accepts  <- rep(0.5, r_per_h) # incoming unlabeled; passed on to slave; 
