@@ -107,7 +107,7 @@ for (rep in c(1:20)){
     Ht <- matrix(TRUE,nrow=nh,ncol=r_per_h)
     cum_samples <- cum_accepts  <- rep(0.5, r_per_h) # incoming unlabeled; passed on to slave; 
     cum_labels <- rep(0, r_per_h)
-    exp4_w <- rep(1, num_policy)
+    if (FLAGS$master!=3){exp4_w <- rep(1, num_policy)}
 
     loss_diff <- rep(0,r_per_h) # if master=2
     last_loss <- rep(1,r_per_h)
@@ -210,11 +210,11 @@ for (rep in c(1:20)){
             obj_tmp <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_labels
 
             if(FLAGS$master!=3){
-            # Make EXP4 updates
-            loss_t <- i * sum(obj_tmp) - (i-1)*sum(objs)
-            loss_t_policy <- rep(loss_t/pass_prob, num_policy); 
-            loss_t_policy[advice_t != as.numeric(action_t)] <- 0
-            exp4_w <- exp4_w * exp(-gamma*loss_t_policy/2); exp4_w <- exp4_w / sum(exp4_w)
+                # Make EXP4 updates
+                loss_t <- i * sum(obj_tmp) - (i-1)*sum(objs)
+                loss_t_policy <- rep(loss_t/pass_prob, num_policy); 
+                loss_t_policy[advice_t != as.numeric(action_t)] <- 0
+                exp4_w <- exp4_w * exp(-gamma*loss_t_policy/2); exp4_w <- exp4_w / sum(exp4_w)
             }
 
             objs <- obj_tmp
