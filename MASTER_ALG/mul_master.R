@@ -35,8 +35,9 @@ option_list <- list(make_option(c("-d", "--dataset"), type="character", default=
                     )
 # Master
 # 1.EXP4, policy: threshold, 
-# 2.EXP4, policy: threshold 1 + optimal control via Langrange
+# 2 [NOT GOOD].EXP4, policy: threshold 1 + optimal control via Langrange
 # 3.Deterministic with expeccted probability of requesting.
+# 4.Randomized version of 3, use same policy set of 1
 
 opt_parser <- OptionParser(option_list=option_list);
 opt <- parse_args(opt_parser);
@@ -53,15 +54,13 @@ nT <- nrow(X)
 ntrain <- floor(nT * 0.8); ntest <- nT - ntrain
 
 # -- policy set and learning rate
-num_policy1 <- 100
-policy_set1 <- seq(0, FLAGS$cost/ntrain, length.out=num_policy1)
-gamma <- sqrt(log(num_policy1)/(ntrain*(FLAGS$cost)^2))
-
-if (FLAGS$master==1){ num_policy <- num_policy1
-} else if (FLAGS$master==2){ 
-    policy_set2 <- seq(0,1,0.1) 
-    num_policy <- num_policy1 * length(policy_set2)
+num_policy <- 100
+if (FLAGS$master==1){
+    policy_set <- seq(0, FLAGS$cost/ntrain, length.out=num_policy)
+} else if (FLAGS$master==4){
+    policy_set <- seq(-FLAGS$cost/ntrain, FLAGS$cost/ntrain, length.out=num_policy)
 }
+gamma <- sqrt(log(num_policy)/(ntrain*(FLAGS$cost)^2))
 
 for (rep in c(1:20)){
     opt2 <- as.list(FLAGS) ;opt2$datafolder <- NULL ;opt2$otb <- NULL ;opt2$help <- NULL ;opt2$out_directory <- NULL
@@ -98,19 +97,18 @@ for (rep in c(1:20)){
     if (max_x_norm * max(scales) > 50){ M <- max_x_norm * max(scales) } else{
         M <- log(1+exp(max_x_norm*max(scales)))}# upper bound of logistic loss
 
-    # --  When master = 3, prepare a  holdout unlabeled set
+    # --  When master = 3 or 4, prepare a  holdout unlabeled set
     req_prob_X <- testX[1:min(10000,ntest),]; req_prob_k <- testk[1:min(10000,ntest)]
-    req_prob <- rep(-1,r_per_h)
+    req_prob <- rep(1,r_per_h)
+    cum_req_prob <- rep(0,r_per_h)
 
     # -- book keeping
     cum_loss <- matrix(0,nrow=nh,ncol=r_per_h)
     Ht <- matrix(TRUE,nrow=nh,ncol=r_per_h)
     cum_samples <- cum_accepts  <- rep(0.5, r_per_h) # incoming unlabeled; passed on to slave; 
     cum_labels <- rep(0, r_per_h)
-    if (FLAGS$master!=3){exp4_w <- rep(1, num_policy)}
+    exp_w <- rep(1, num_policy)
 
-    loss_diff <- rep(0,r_per_h) # if master=2
-    last_loss <- rep(1,r_per_h)
     cum_loss_misclass <- cum_loss_logistic <- cum_loss_al <- It <- 0 ## meaningless stuff
 
     checkpoint <- min(100,floor(nT / (100*10)) * 100)
@@ -128,47 +126,38 @@ for (rep in c(1:20)){
             cum_labels[k_t] <- cum_labels[k_t]+1
             cum_accepts[k_t] <- cum_accepts[k_t]+1
             cum_loss[,k_t] <- cum_loss[,k_t] + loss_func(pred_t,y_t,'logistic')/(M) # importance weighted cum_loss
+            cum_req_prob[k_t] <- cum_req_prob[k_t] + req_prob[k_t]
 
             p_tmp <- cum_samples/sum(cum_samples)
             reg_tmp <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
-            obj_tmp <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_labels
-            objs <- obj_tmp
-
-            if (FLAGS$master==2){
-                curr_loss <- min((cum_loss[,k_t])[Ht[,k_t]])/cum_accepts[k_t]
-                loss_diff[k_t] <- last_loss[k_t]-curr_loss
-                last_loss[k_t] <- curr_loss
+            if (FLAGS$master==1){ 
+                objs <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_labels
+            } else if (FLAGS$master==4){
+                objs <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_req_prob
             }
         } else{
             p_tmp <- cum_samples/sum(cum_samples)
             reg_diff_tmp <- sqrt(log(cum_accepts+1)/(cum_accepts+1)) - sqrt(log(cum_accepts+2)/(cum_accepts+2)) 
             req_prop_tmp <- cum_labels/cum_accepts
 
-            if(FLAGS$master==3 & req_prob[k_t] == -1){
+            if(FLAGS$master %in% c(3,4) & req_prob[k_t] == 1){
                 avail_h <- all_h[Ht[,k_t],]; 
                 req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
                 req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
             }
 
-            if (FLAGS$master!=3){
+            if (FLAGS$master==1){
                 # Expert advice
-                advice_t1 <- as.numeric((p_tmp*reg_diff_tmp)[k_t] - FLAGS$cost/ntrain * (req_prop_tmp)[k_t] > policy_set1)
-                if (FLAGS$master==1 ){ advice_t <- advice_t1
-                } else {
-                    if( sum(loss_diff)==0 ){accept_prob <- rep(1,r_per_h)
-                    } else { accept_prob <- loss_diff/sum(abs(loss_diff))}
-                    accept_prob <- (exp(10*accept_prob)/sum(exp(10*accept_prob)))[k_t]
-                    advice_t2 <- as.numeric(accept_prob > policy_set2)
-                    advice_tmp <- expand.grid(advice_t1,advice_t2)
-                    advice_t <- advice_tmp[,1] * advice_tmp[,2]
-                } 
-
-                # Vote
-                pass_prob <- (1-gamma)*sum(exp4_w * advice_t)/sum(exp4_w) + gamma/2
+                advice_t <- as.numeric((p_tmp*reg_diff_tmp)[k_t] - FLAGS$cost/ntrain * (req_prop_tmp)[k_t] > policy_set)
+                pass_prob <- (1-gamma)*sum(exp_w * advice_t)/sum(exp_w) + gamma/2
                 action_t <- runif(1) < pass_prob
-            } else {
+            } else if (FLAGS$master==3){
                 ex_reward <- (p_tmp*reg_diff_tmp)[k_t] - FLAGS$cost/ntrain * req_prob[k_t]
                 action_t <- ex_reward > 0
+            } else if (FLAGS$master==4){
+                advice_t <- as.numeric((p_tmp*reg_diff_tmp)[k_t] - FLAGS$cost/ntrain * (req_prob)[k_t] > policy_set)
+                pass_prob <- (1-gamma)*sum(exp_w * advice_t)/sum(exp_w) + gamma/2
+                action_t <- runif(1) < pass_prob
             }
 
             if (action_t){
@@ -179,6 +168,7 @@ for (rep in c(1:20)){
                 p_t <- max(log(1+exp(-pred_min)) - log(1+exp(-pred_max)),
                            log(1+exp(pred_max)) - log(1+exp(pred_min))) / M
                 Q_t <- as.numeric(runif(1) < p_t)
+                cum_req_prob[k_t] <- cum_req_prob[k_t] + req_prob[k_t]
 
                 if (Q_t > 0){
                     cum_labels[k_t] <- cum_labels[k_t]+1; 
@@ -190,13 +180,7 @@ for (rep in c(1:20)){
                     Ht[,k_t] <- (Ht[,k_t]  & cum_loss[,k_t] <= min_err + slack_t)
                     Ht_sum_new <- sum(Ht[,k_t])
 
-                    if (FLAGS$master==2){
-                        curr_loss <- min((cum_loss[,k_t])[Ht[,k_t]])/cum_accepts[k_t]
-                        loss_diff[k_t] <- last_loss[k_t]-curr_loss
-                        last_loss[k_t] <- curr_loss
-                    }
-
-                    if(FLAGS$master==3 & Ht_sum_new < Ht_sum_old){
+                    if(FLAGS$master %in% c(3,4) & Ht_sum_new < Ht_sum_old){
                         avail_h <- all_h[Ht[,k_t],]; 
                         req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
                         req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
@@ -206,18 +190,31 @@ for (rep in c(1:20)){
 
             # Loss
             p_tmp <- cum_samples/sum(cum_samples)
-            reg_tmp <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
-            obj_tmp <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_labels
 
-            if(FLAGS$master!=3){
+            if(FLAGS$master==1){
+                reg_tmp <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
+                obj_tmp <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_labels
                 # Make EXP4 updates
                 loss_t <- i * sum(obj_tmp) - (i-1)*sum(objs)
                 loss_t_policy <- rep(loss_t/pass_prob, num_policy); 
                 loss_t_policy[advice_t != as.numeric(action_t)] <- 0
-                exp4_w <- exp4_w * exp(-gamma*loss_t_policy/2); exp4_w <- exp4_w / sum(exp4_w)
+                exp_w <- exp_w * exp(-gamma*loss_t_policy/2); exp_w <- exp_w / sum(exp_w)
+                objs <- obj_tmp
+            } else if (FLAGS$master==4){
+                loss_0 <- 0
+                if(action_t){
+                    reg_tmp1 <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
+                    obj_tmp1 <- p_tmp * reg_tmp1 + (FLAGS$cost/ntrain) * cum_req_prob
+                } else {
+                    reg_tmp1 <- sqrt(log(2+cum_accepts)/(cum_accepts+2)) 
+                    cum_req_prob_tmp <- cum_req_prob; cum_req_prob_tmp[k_t] <- cum_req_prob_tmp[k_t]+req_prob[k_t]
+                    obj_tmp1 <- p_tmp * reg_tmp1 + (FLAGS$cost/ntrain) * cum_req_prob_tmp
+                }
+                loss_1 <-  i*sum(obj_tmp1) - (i-1)*sum(objs)
+                loss_t <- rep(0, num_policy); loss_t[advice_t==0] <- loss_0; loss_t[advice_t==1] <- loss_1
+                exp_w <- exp_w * exp(-gamma*loss_t); exp_w <- exp_w / sum(exp_w)
+                if(action_t){objs <- obj_tmp1}
             }
-
-            objs <- obj_tmp
         }
 
         CUM_LABELS <- sum(cum_labels)
