@@ -104,7 +104,7 @@ for (rep in c(1:20)){
 
     # -- book keeping
     cum_loss <- matrix(0,nrow=nh,ncol=r_per_h)
-    Ht <- matrix(TRUE,nrow=nh,ncol=r_per_h)
+    Ht <- matrix(TRUE,nrow=nh,ncol=r_per_h); Ht_sum_old <- rep(nh, each=r_per_h)
     cum_samples <- cum_accepts  <- rep(0.5, r_per_h) # incoming unlabeled; passed on to slave; 
     cum_labels <- rep(0, r_per_h)
     exp_w <- rep(1, num_policy)
@@ -122,7 +122,7 @@ for (rep in c(1:20)){
     for (i in seq_len(ntrain)){
         x_t <- trainX[i,]; y_t <- trainy[i]; k_t <- traink[i]; pred_t <- all_h %*% x_t
         cum_samples[k_t] <- cum_samples[k_t] +1
-        if (i <= n_warmup){
+        if (i <= n_warmup || cum_accepts[k_t] <= n_warmup/r_per_h){
             cum_labels[k_t] <- cum_labels[k_t]+1
             cum_accepts[k_t] <- cum_accepts[k_t]+1
             cum_loss[,k_t] <- cum_loss[,k_t] + loss_func(pred_t,y_t,'logistic')/(M) # importance weighted cum_loss
@@ -156,9 +156,10 @@ for (rep in c(1:20)){
                 action_t <- ex_reward > 0
             } else if (FLAGS$master==4){
                 advice_t <- as.numeric((p_tmp*reg_diff_tmp)[k_t] - FLAGS$cost/ntrain * (req_prob)[k_t] > policy_set)
-                pass_prob <- (1-gamma)*sum(exp_w * advice_t)/sum(exp_w) + gamma/2
-                action_t <- runif(1) < pass_prob
+                It <- which(runif(1) < cumsum(exp_w))[1]
+                action_t <- advice_t[It]
             }
+
 
             if (action_t){
                 cum_accepts[k_t] <- cum_accepts[k_t]+1
@@ -176,15 +177,7 @@ for (rep in c(1:20)){
                     min_err <- min((cum_loss[,k_t])[Ht[,k_t]])
                     T_t <- cum_accepts[k_t]
                     slack_t <- sqrt(T_t*log(T_t+1)) # a more aggresive slack term than IWAL paper
-                    Ht_sum_old <- sum(Ht[,k_t])
                     Ht[,k_t] <- (Ht[,k_t]  & cum_loss[,k_t] <= min_err + slack_t)
-                    Ht_sum_new <- sum(Ht[,k_t])
-
-                    if(FLAGS$master %in% c(3,4) & Ht_sum_new < Ht_sum_old){
-                        avail_h <- all_h[Ht[,k_t],]; 
-                        req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
-                        req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
-                    }
                 } 
             }
 
@@ -201,19 +194,37 @@ for (rep in c(1:20)){
                 exp_w <- exp_w * exp(-gamma*loss_t_policy/2); exp_w <- exp_w / sum(exp_w)
                 objs <- obj_tmp
             } else if (FLAGS$master==4){
-                loss_0 <- 0
                 if(action_t){
                     reg_tmp1 <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
                     obj_tmp1 <- p_tmp * reg_tmp1 + (FLAGS$cost/ntrain) * cum_req_prob
+
+                    cum_accepts_tmp <- cum_accepts; cum_accepts_tmp[k_t] <- cum_accepts_tmp[k_t] -1
+                    cum_req_prob_tmp <- cum_req_prob; cum_req_prob_tmp[k_t] <- cum_req_prob_tmp[k_t]-req_prob[k_t]
+                    reg_tmp0 <- sqrt(log(cum_accepts_tmp+1)/(cum_accepts_tmp+1)) 
+                    obj_tmp0 <- p_tmp * reg_tmp0 + (FLAGS$cost/ntrain) * cum_req_prob_tmp
                 } else {
-                    reg_tmp1 <- sqrt(log(2+cum_accepts)/(cum_accepts+2)) 
+                    cum_accepts_tmp <- cum_accepts; cum_accepts_tmp[k_t] <- cum_accepts_tmp[k_t]+1
                     cum_req_prob_tmp <- cum_req_prob; cum_req_prob_tmp[k_t] <- cum_req_prob_tmp[k_t]+req_prob[k_t]
+                    reg_tmp1 <- sqrt(log(1+cum_accepts_tmp)/(cum_accepts_tmp+1)) 
                     obj_tmp1 <- p_tmp * reg_tmp1 + (FLAGS$cost/ntrain) * cum_req_prob_tmp
+
+                    reg_tmp0 <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
+                    obj_tmp0 <- p_tmp * reg_tmp0 + (FLAGS$cost/ntrain) * cum_req_prob
                 }
+
                 loss_1 <-  i*sum(obj_tmp1) - (i-1)*sum(objs)
+                loss_0 <-  i*sum(obj_tmp0) - (i-1)*sum(objs)
                 loss_t <- rep(0, num_policy); loss_t[advice_t==0] <- loss_0; loss_t[advice_t==1] <- loss_1
                 exp_w <- exp_w * exp(-gamma*loss_t); exp_w <- exp_w / sum(exp_w)
-                if(action_t){objs <- obj_tmp1}
+                if(action_t){objs <- obj_tmp1} else {objs <- obj_tmp0}
+            }
+
+            Ht_sum_new <- sum(Ht[,k_t])
+            if(FLAGS$master %in% c(3,4) & Ht_sum_new < Ht_sum_old[k_t]){
+                avail_h <- all_h[Ht[,k_t],]; 
+                req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
+                req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
+                Ht_sum_old[k_t] <- Ht_sum_new
             }
         }
 
