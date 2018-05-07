@@ -34,6 +34,10 @@ load(datafile)
 nT <- nrow(X)
 
 for (rep in c(1:20)){
+    opt2 <- as.list(FLAGS) ;opt2$datafolder <- NULL ;opt2$otb <- NULL ;opt2$help <- NULL ;opt2$out_directory <- NULL
+    basefilename <- paste0(paste0(names(opt2),'_',opt2), collapse = '_')
+    filename <- paste0(FLAGS$out_directory,'/',basefilename, '_otb_rep',rep,'.csv')
+    if(file.exists(filename)){next}
 
     set.seed(rep); shuffle <- sample(nrow(X),nrow(X),replace = FALSE)
     ntrain <- floor(nT * 0.8); ntest <- nT - ntrain
