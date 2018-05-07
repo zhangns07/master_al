@@ -45,19 +45,20 @@ for (rep in c(1:20)){
     preprop <- preProcess(trainX_tmp,method=c('center','scale'))
     trainX <- predict(preprop, trainX_tmp)
     testX <- predict(preprop, testX_tmp) 
-    trainX <- as.matrix(trainX); testX <- as.matrix(testX)
-
+    trainX <- cbind(1,as.matrix(trainX)); testX <- cbind(1,as.matrix(testX))
 
     # take first 50 and train svm
 #    model_lr <- glm.fit(trainX[1:n_warmup,],0.5+0.5*trainy[1:n_warmup],family=binomial(link='logit'))
 #    h0 <- model_lr$coefficients; 
 #    h0[is.na(h0)] <- 0; h0 <- h0/sqrt(sum(h0^2))
 
-    model_svm <- svm(trainX[1:n_warmup,], trainy[1:n_warmup], kernel='linear', scale = FALSE)
-    h0 <- t(model_svm$coefs) %*% model_svm$SV
+    model_svm <- svm(trainX[1:n_warmup,-1], trainy[1:n_warmup], kernel='linear', scale = FALSE)
+    w0 <- t(model_svm$coefs) %*% model_svm$SV;
+    h0 <- c(-model_svm$rho, w0)
+    h0 <- h0/sqrt(sum(h0^2))
 
     scales <- 2^seq(0,FLAGS$lognorm,1)
-    all_h <- gen_all_h(num_dim=ncol(X), num_base_models=FLAGS$basemodel, scales, h0=h0)
+    all_h <- gen_all_h(num_dim=ncol(trainX), num_base_models=FLAGS$basemodel, scales, h0=h0)
     nh <- nrow(all_h)
 
     # When models' norm scales, scales thre as well.
