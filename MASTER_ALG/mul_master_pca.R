@@ -6,12 +6,15 @@ library(data.table)
 library(caret)
 library(e1071)
 source('0.init.R')
+
+exp_of <- function(x){if (x>=100){return (x) }else{ return (log(1+exp(x))) } } # with overflow control
 get_req_prob <- function(h, X, M){
     ret <- apply(X,1,function(x){
                      pred_t <- h %*% x
                      pred_max <- max(pred_t); pred_min <- min(pred_t)
-                     p_t <- max(log(1+exp(-pred_min)) - log(1+exp(-pred_max)),
-                                log(1+exp(pred_max)) - log(1+exp(pred_min))) / M })
+                     p_t <- max(exp_of(-pred_max) - exp_of(-pred_max),# log(1+exp(-pred_min)) - log(1+exp(-pred_max)),
+                                exp_of(pred_max) - exp_of(pred_min) )/M#log(1+exp(pred_max)) - log(1+exp(pred_min))) / M 
+                     min(p_t,1) })
     mean(ret)
 }
 
@@ -101,11 +104,6 @@ for (rep in c(1:20)){
     if (max_x_norm * max(scales) > 50){ M <- max_x_norm * max(scales) } else{
         M <- log(1+exp(max_x_norm*max(scales)))}# upper bound of logistic loss
 
-    # --  When master = 3 or 4, prepare a  holdout unlabeled set
-    req_prob_X <- testX[1:min(10000,ntest),]; req_prob_k <- testk[1:min(10000,ntest)]
-    req_prob <- rep(1,r_per_h)
-    cum_req_prob <- rep(0,r_per_h)
-
     # -- rebuild k
     set.seed(40)
     Xcol <- ncol(trainX)
@@ -115,6 +113,12 @@ for (rep in c(1:20)){
     traink <- apply(train_dist,1,which.min)
     test_dist <- abs(as.matrix(testX) %*% t(rand_planes))
     testk <- apply(test_dist,1,which.min)
+
+    # --  When master = 3 or 4, prepare a  holdout unlabeled set
+    req_prob_X <- testX[1:min(10000,ntest),]; req_prob_k <- testk[1:min(10000,ntest)]
+    req_prob <- rep(1,r_per_h)
+    cum_req_prob <- rep(0,r_per_h)
+
 
     # -- book keeping
     cum_loss <- matrix(0,nrow=nh,ncol=r_per_h)
@@ -136,6 +140,7 @@ for (rep in c(1:20)){
     for (i in seq_len(ntrain)){
         x_t <- trainX[i,]; y_t <- trainy[i]; k_t <- traink[i]; pred_t <- all_h %*% x_t
         cum_samples[k_t] <- cum_samples[k_t] +1
+        #if(k_t %in% c(4,5,7,9)){break}
         if (i <= n_warmup || cum_accepts[k_t] <= n_warmup/r_per_h){
             cum_labels[k_t] <- cum_labels[k_t]+1
             cum_accepts[k_t] <- cum_accepts[k_t]+1
