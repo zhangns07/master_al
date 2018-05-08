@@ -119,7 +119,6 @@ for (rep in c(1:20)){
     req_prob <- rep(1,r_per_h)
     cum_req_prob <- rep(0,r_per_h)
 
-
     # -- book keeping
     cum_loss <- matrix(0,nrow=nh,ncol=r_per_h)
     Ht <- matrix(TRUE,nrow=nh,ncol=r_per_h); Ht_sum_old <- rep(nh, each=r_per_h)
