@@ -33,7 +33,6 @@ datafile <- paste0(FLAGS$datafolder, '/', FLAGS$dataset, '.RData')
 load(datafile)
 nT <- nrow(X)
 
-# remove almost constant columns
 for (rep in c(1:20)){
     opt2 <- as.list(FLAGS) ;opt2$datafolder <- NULL ;opt2$otb <- NULL ;opt2$help <- NULL ;opt2$out_directory <- NULL
     basefilename <- paste0(paste0(names(opt2),'_',opt2), collapse = '_')
