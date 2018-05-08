@@ -34,6 +34,10 @@ load(datafile)
 nT <- nrow(X)
 
 for (rep in c(1:20)){
+    opt2 <- as.list(FLAGS) ;opt2$datafolder <- NULL ;opt2$otb <- NULL ;opt2$help <- NULL ;opt2$out_directory <- NULL
+    basefilename <- paste0(paste0(names(opt2),'_',opt2), collapse = '_')
+    filename <- paste0(FLAGS$out_directory,'/',basefilename, '_otb_rep',rep,'.csv')
+    if(file.exists(filename)){next}
 
     set.seed(rep); shuffle <- sample(nrow(X),nrow(X),replace = FALSE)
     ntrain <- floor(nT * 0.8); ntest <- nT - ntrain
@@ -50,13 +54,13 @@ for (rep in c(1:20)){
     # take first 50 and train svm
 #    model_lr <- glm.fit(trainX[1:n_warmup,],0.5+0.5*trainy[1:n_warmup],family=binomial(link='logit'))
 #    h0 <- model_lr$coefficients; h0 <- h0/sqrt(sum(h0^2))
-    model_svm <- svm(trainX[1:n_warmup,-1], trainy[1:n_warmup], kernel='linear', scale = FALSE)
-    w0 <- t(model_svm$coefs) %*% model_svm$SV;
-    h0 <- c(-model_svm$rho, w0)
-    h0 <- h0/sqrt(sum(h0^2))
+#    model_svm <- svm(trainX[1:n_warmup,-1], trainy[1:n_warmup], kernel='linear', scale = FALSE)
+#    w0 <- t(model_svm$coefs) %*% model_svm$SV;
+#    h0 <- c(-model_svm$rho, w0)
+#    h0 <- h0/sqrt(sum(h0^2))
 
     scales <- 2^seq(0,FLAGS$lognorm,1)
-    all_h <- gen_all_h(num_dim=ncol(trainX), num_base_models=FLAGS$basemodel, scales, h0=h0)
+    all_h <- gen_all_h(num_dim=ncol(trainX), num_base_models=FLAGS$basemodel, scales)#, h0=h0)
     nh <- nrow(all_h)
 
     # When models' norm scales, scales thre as well.
@@ -74,12 +78,15 @@ for (rep in c(1:20)){
     if (checkpoint==0){checkpoint <- 25}
 
     # rebuild k
-    thres <- quantile(X_norm, c(1:10)/10)
-    thres[10] <- Inf; thres <- unique(thres)
-    r_per_h <- length(thres)
-    Xtest_norm <- apply(testX,1,function(x){sqrt(sum(x^2))})
-    traink <- apply(array(X_norm),1,function(x){which(x < thres)[1]})
-    testk <- apply(array(Xtest_norm),1,function(x){which(x < thres)[1]})
+    set.seed(40)
+    r_per_h <- 10; Xcol <- ncol(trainX)
+    rand_planes <- matrix(rnorm(Xcol*r_per_h), ncol=Xcol)
+    rand_planes <- rand_planes / sqrt(rowSums(rand_planes^2))
+    train_dist <- abs(as.matrix(trainX) %*% t(rand_planes))
+    traink <- apply(train_dist,1,which.min)
+    test_dist <- abs(as.matrix(testX) %*% t(rand_planes))
+    testk <- apply(test_dist,1,which.min)
+
 
     cum_loss <- matrix(0,nrow=nh,ncol=r_per_h)
     Ht <- matrix(TRUE,nrow=nh,ncol=r_per_h)
@@ -121,13 +128,7 @@ for (rep in c(1:20)){
         if (i!= last_i & cum_label != last_cum_label & (i %% checkpoint ==0 || cum_label %% checkpoint == 0)){
             last_i <-  i
             last_cum_label <- cum_label
-            cat('num of rounds:',i,
-                ', num of labels:',cum_label,
-                ', expert:',It,
-                ', misclass_loss/i:', cum_loss_misclass/i,
-                ', logistic_loss/i:', cum_loss_logistic/i,'\n')
-
-#            RET_iwal <- rbind(RET_iwal,c(i,cum_label,It, p_t,cum_loss_al ,cum_loss_misclass, cum_loss_logistic))
+            cat('num of rounds:',i, ', num of labels:',cum_label, '\n')
 
             opt_Its <- rep(0,r_per_h)
             for(r in c(1:r_per_h)){ opt_Its[r] <- (seq_len(nh)[Ht[,r]])[which.min((cum_loss[,r])[Ht[,r]])] }
@@ -140,20 +141,11 @@ for (rep in c(1:20)){
     for(r in c(1:r_per_h)){ opt_Its[r] <- (seq_len(nh)[Ht[,r]])[which.min((cum_loss[,r])[Ht[,r]])] }
     curr_otb <- mul_otb(testX, testy, all_h, testk, opt_Its)
     OTB_iwal <- rbind(OTB_iwal, c(i, cum_label, curr_otb))
+    colnames(OTB_iwal) <- c('round','labels','loss_misclass','loss_logistic')
 
     # save to file
-    opt2 <- as.list(FLAGS)
-    opt2$datafolder <- NULL
-    opt2$otb <- NULL
-    opt2$help <- NULL
-    opt2$out_directory <- NULL
+    opt2 <- as.list(FLAGS) ;opt2$datafolder <- NULL ;opt2$otb <- NULL ;opt2$help <- NULL ;opt2$out_directory <- NULL
     basefilename <- paste0(paste0(names(opt2),'_',opt2), collapse = '_')
-
-#    filename <- paste0(FLAGS$out_directory,'/',basefilename, '_rep',rep,'.csv')
-#    colnames(RET_iwal) <- c('round','labels','It','pt','cum_loss_al','cum_loss_misclass','cum_loss_logistic')
-#    write.table(RET_iwal,filename, sep = ',', row.names = FALSE)
-
     filename <- paste0(FLAGS$out_directory,'/',basefilename, '_otb_rep',rep,'.csv')
-    colnames(OTB_iwal) <- c('round','labels','loss_misclass','loss_logistic')
     write.table(OTB_iwal,filename, sep = ',', row.names = FALSE)
 }
