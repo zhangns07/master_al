@@ -101,11 +101,6 @@ for (rep in c(1:20)){
     if (max_x_norm * max(scales) > 50){ M <- max_x_norm * max(scales) } else{
         M <- log(1+exp(max_x_norm*max(scales)))}# upper bound of logistic loss
 
-    # --  When master = 3 or 4, prepare a  holdout unlabeled set
-    req_prob_X <- testX[1:min(10000,ntest),]; req_prob_k <- testk[1:min(10000,ntest)]
-    req_prob <- rep(1,r_per_h)
-    cum_req_prob <- rep(0,r_per_h)
-
     # -- rebuild k
     set.seed(40)
     Xcol <- ncol(trainX)
@@ -115,6 +110,11 @@ for (rep in c(1:20)){
     traink <- apply(train_dist,1,which.min)
     test_dist <- abs(as.matrix(testX) %*% t(rand_planes))
     testk <- apply(test_dist,1,which.min)
+
+    # --  When master = 3 or 4, prepare a  holdout unlabeled set
+    req_prob_X <- testX[1:min(10000,ntest),]; req_prob_k <- testk[1:min(10000,ntest)]
+    req_prob <- rep(1,r_per_h)
+    cum_req_prob <- rep(0,r_per_h)
 
     # -- book keeping
     cum_loss <- matrix(0,nrow=nh,ncol=r_per_h)
