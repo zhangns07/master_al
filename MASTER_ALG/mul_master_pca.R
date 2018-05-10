@@ -41,6 +41,7 @@ option_list <- list(make_option(c("-d", "--dataset"), type="character", default=
 # 2 [NOT GOOD].EXP4, policy: threshold 1 + optimal control via Langrange
 # 3.Deterministic with expeccted probability of requesting.
 # 4.Randomized version of 3, use same policy set of 1
+# 5.Claudio's idea: each policy is a point in simplex, that corresponds to probability of passing samples on
 
 opt_parser <- OptionParser(option_list=option_list);
 opt <- parse_args(opt_parser);
@@ -57,11 +58,14 @@ nT <- nrow(X)
 ntrain <- floor(nT * 0.8); ntest <- nT - ntrain
 
 # -- policy set and learning rate
-num_policy <- 100
 if (FLAGS$master==1){
+    num_policy <- 100
     policy_set <- seq(0, FLAGS$cost/ntrain, length.out=num_policy)
 } else if (FLAGS$master==4){
+    num_policy <- 100
     policy_set <- seq(-FLAGS$cost/ntrain, FLAGS$cost/ntrain, length.out=num_policy)
+} else if (FLAGS$master==5){
+    num_policy <- 100
 }
 gamma <- sqrt(log(num_policy)/(ntrain*(FLAGS$cost)^2))
 
@@ -97,6 +101,12 @@ for (rep in c(1:20)){
     all_h <- gen_all_h(num_dim=ncol(trainX), num_base_models=FLAGS$basemodel, scales)#, h0=h0)
     nh <- nrow(all_h)
     r_per_h <- 10
+
+    # -- generate uniform sample from simplex as policies
+    if (FLAGS$master==5){
+        tmp_set <- matrix(-log(runif(num_policy*r_per_h)),ncol=r_per_h)
+        policy_set <- t(apply(tmp_set, 1, function(x){x/sum(x)}))
+    }
 
     # --  When models' norm scales, scales thre as well.
     X_norm <- apply(trainX,1,function(x){sqrt(sum(x^2))})
@@ -162,7 +172,7 @@ for (rep in c(1:20)){
                 avail_h <- all_h[Ht[,k_t],]; 
                 req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
                 req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
-            }
+            } 
 
             if (FLAGS$master==1){
                 # Expert advice
@@ -176,8 +186,11 @@ for (rep in c(1:20)){
                 advice_t <- as.numeric((p_tmp*reg_diff_tmp)[k_t] - FLAGS$cost/ntrain * (req_prob)[k_t] > policy_set)
                 It <- which(runif(1) < cumsum(exp_w))[1]
                 action_t <- advice_t[It]
+            } else if (FLAGS$master==5){
+                advice_t <- as.numeric(runif(1) < policy_set[,k_t])
+                It <- which(runif(1) < cumsum(exp_w))[1]
+                action_t <- advice_t[It]
             }
-
 
             if (action_t){
                 cum_accepts[k_t] <- cum_accepts[k_t]+1
@@ -211,7 +224,7 @@ for (rep in c(1:20)){
                 loss_t_policy[advice_t != as.numeric(action_t)] <- 0
                 exp_w <- exp_w * exp(-gamma*loss_t_policy/2); exp_w <- exp_w / sum(exp_w)
                 objs <- obj_tmp
-            } else if (FLAGS$master==4){
+            } else if (FLAGS$master %in% c(4,5)){
                 if(action_t){
                     reg_tmp1 <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
                     obj_tmp1 <- p_tmp * reg_tmp1 + (FLAGS$cost/ntrain) * cum_req_prob
