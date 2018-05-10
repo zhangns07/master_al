@@ -160,7 +160,7 @@ for (rep in c(1:20)){
             reg_tmp <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
             if (FLAGS$master==1){ 
                 objs <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_labels
-            } else if (FLAGS$master==4){
+            } else if (FLAGS$master %in% c(4,5)){
                 objs <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_req_prob
             }
         } else{
@@ -168,7 +168,7 @@ for (rep in c(1:20)){
             reg_diff_tmp <- sqrt(log(cum_accepts+1)/(cum_accepts+1)) - sqrt(log(cum_accepts+2)/(cum_accepts+2)) 
             req_prop_tmp <- cum_labels/cum_accepts
 
-            if(FLAGS$master %in% c(3,4) & req_prob[k_t] == 1){
+            if(FLAGS$master %in% c(3,4,5) & req_prob[k_t] == 1){
                 avail_h <- all_h[Ht[,k_t],]; 
                 req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
                 req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
@@ -251,7 +251,7 @@ for (rep in c(1:20)){
             }
 
             Ht_sum_new <- sum(Ht[,k_t])
-            if(FLAGS$master %in% c(3,4) & Ht_sum_new < Ht_sum_old[k_t]){
+            if(FLAGS$master %in% c(3,4,5) & Ht_sum_new < Ht_sum_old[k_t]){
                 avail_h <- all_h[Ht[,k_t],]; 
                 req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
                 req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
