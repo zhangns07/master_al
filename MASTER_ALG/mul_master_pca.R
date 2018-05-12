@@ -42,6 +42,8 @@ option_list <- list(make_option(c("-d", "--dataset"), type="character", default=
 # 3.Deterministic with expeccted probability of requesting.
 # 4.Randomized version of 3, use same policy set of 1
 # 5.Claudio's idea: each policy is a point in simplex, that corresponds to probability of passing samples on
+# 6.Ranking: top [k] experts with largest p_k * reg_k
+# 7.Ranking: top [k] experts with largest difference between reg / obs
 
 opt_parser <- OptionParser(option_list=option_list);
 opt <- parse_args(opt_parser);
@@ -56,16 +58,16 @@ datafile <- paste0(FLAGS$datafolder, '/', FLAGS$dataset, '.RData')
 load(datafile)
 nT <- nrow(X)
 ntrain <- floor(nT * 0.8); ntest <- nT - ntrain
+r_per_h <- 10
 
 # -- policy set and learning rate
+num_policy <- 100
 if (FLAGS$master==1){
-    num_policy <- 100
     policy_set <- seq(0, FLAGS$cost/ntrain, length.out=num_policy)
 } else if (FLAGS$master==4){
-    num_policy <- 100
     policy_set <- seq(-FLAGS$cost/ntrain, FLAGS$cost/ntrain, length.out=num_policy)
-} else if (FLAGS$master==5){
-    num_policy <- 100
+} else if (FLAGS$master %in% c(6,7)){
+    num_policy <- r_per_h
 }
 gamma <- sqrt(log(num_policy)/(ntrain*(FLAGS$cost)^2))
 
@@ -100,7 +102,6 @@ for (rep in c(1:20)){
     scales <- 2^seq(0,FLAGS$lognorm,1)
     all_h <- gen_all_h(num_dim=ncol(trainX), num_base_models=FLAGS$basemodel, scales)#, h0=h0)
     nh <- nrow(all_h)
-    r_per_h <- 10
 
     # -- generate uniform sample from simplex as policies
     if (FLAGS$master==5){
@@ -124,7 +125,7 @@ for (rep in c(1:20)){
     test_dist <- abs(as.matrix(testX) %*% t(rand_planes))
     testk <- apply(test_dist,1,which.min)
 
-    # --  When master = 3 or 4, prepare a  holdout unlabeled set
+    # --  prepare a  holdout unlabeled set
     req_prob_X <- testX[1:min(10000,ntest),]; req_prob_k <- testk[1:min(10000,ntest)]
     req_prob <- rep(1,r_per_h)
     cum_req_prob <- rep(0,r_per_h)
@@ -134,8 +135,7 @@ for (rep in c(1:20)){
     Ht <- matrix(TRUE,nrow=nh,ncol=r_per_h); Ht_sum_old <- rep(nh, each=r_per_h)
     cum_samples <- cum_accepts  <- rep(0.5, r_per_h) # incoming unlabeled; passed on to slave; 
     cum_labels <- rep(0, r_per_h)
-    exp_w <- rep(1, num_policy)
-
+    exp_w <- rep(1, num_policy); exp_w <- exp_w / sum(exp_w)
     cum_loss_misclass <- cum_loss_logistic <- cum_loss_al <- It <- 0 ## meaningless stuff
 
     checkpoint <- min(100,floor(nT / (100*10)) * 100)
@@ -160,15 +160,16 @@ for (rep in c(1:20)){
             reg_tmp <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
             if (FLAGS$master==1){ 
                 objs <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_labels
-            } else if (FLAGS$master %in% c(4,5)){
+            } else if (FLAGS$master %in% c(4,5,6,7)){
                 objs <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_req_prob
             }
         } else{
             p_tmp <- cum_samples/sum(cum_samples)
             reg_diff_tmp <- sqrt(log(cum_accepts+1)/(cum_accepts+1)) - sqrt(log(cum_accepts+2)/(cum_accepts+2)) 
             req_prop_tmp <- cum_labels/cum_accepts
+            reg_tmp <- p_tmp * sqrt(log(cum_accepts+1)/(cum_accepts+1))
 
-            if(FLAGS$master %in% c(3,4,5) & req_prob[k_t] == 1){
+            if(FLAGS$master %in% c(3,4,5,6,7) & req_prob[k_t] == 1){
                 avail_h <- all_h[Ht[,k_t],]; 
                 req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
                 req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
@@ -182,12 +183,17 @@ for (rep in c(1:20)){
             } else if (FLAGS$master==3){
                 ex_reward <- (p_tmp*reg_diff_tmp)[k_t] - FLAGS$cost/ntrain * req_prob[k_t]
                 action_t <- ex_reward > 0
-            } else if (FLAGS$master==4){
-                advice_t <- as.numeric((p_tmp*reg_diff_tmp)[k_t] - FLAGS$cost/ntrain * (req_prob)[k_t] > policy_set)
-                It <- which(runif(1) < cumsum(exp_w))[1]
-                action_t <- advice_t[It]
-            } else if (FLAGS$master==5){
-                advice_t <- as.numeric(runif(1) < policy_set[,k_t])
+            } else {
+                if (FLAGS$master==4){
+                    advice_t <- as.numeric((p_tmp*reg_diff_tmp)[k_t] - FLAGS$cost/ntrain * (req_prob)[k_t] > policy_set)
+                } else if (FLAGS$master==5){
+                    advice_t <- as.numeric(runif(1) < policy_set[,k_t])
+                } else if (FLAGS$master==6){
+                    curr_rank <- which(order(-reg_tmp)==k_t); advice_t <- as.numeric(c(1:10) >= curr_rank)
+                } else if (FLAGS$master==7){
+                    tmpreg <- reg_tmp /sum(reg_tmp); tmpobs <- cum_labels / sum(cum_labels) 
+                    curr_rank <- which(order(-tmpreg+tmpobs)==k_t); advice_t <- as.numeric(c(1:10) >= curr_rank)
+                }
                 It <- which(runif(1) < cumsum(exp_w))[1]
                 action_t <- advice_t[It]
             }
@@ -224,7 +230,7 @@ for (rep in c(1:20)){
                 loss_t_policy[advice_t != as.numeric(action_t)] <- 0
                 exp_w <- exp_w * exp(-gamma*loss_t_policy/2); exp_w <- exp_w / sum(exp_w)
                 objs <- obj_tmp
-            } else if (FLAGS$master %in% c(4,5)){
+            } else if (FLAGS$master %in% c(4,5,6,7)){
                 if(action_t){
                     reg_tmp1 <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
                     obj_tmp1 <- p_tmp * reg_tmp1 + (FLAGS$cost/ntrain) * cum_req_prob
@@ -251,7 +257,7 @@ for (rep in c(1:20)){
             }
 
             Ht_sum_new <- sum(Ht[,k_t])
-            if(FLAGS$master %in% c(3,4,5) & Ht_sum_new < Ht_sum_old[k_t]){
+            if(FLAGS$master %in% c(3,4,5,6,7) & Ht_sum_new < Ht_sum_old[k_t]){
                 avail_h <- all_h[Ht[,k_t],]; 
                 req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
                 req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
