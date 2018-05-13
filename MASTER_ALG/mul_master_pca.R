@@ -44,7 +44,8 @@ option_list <- list(make_option(c("-d", "--dataset"), type="character", default=
 # 5.Claudio's idea: each policy is a point in simplex, that corresponds to probability of passing samples on
 # 6.Ranking: top [k] experts with largest p_k * reg_k
 # 7.Ranking: top [k] experts with largest difference between reg / obs
-# 8.Ranking: top [k] experts with largest decrease in reg 
+# 8.Ranking: top [k] experts with largest decrease in reg since last obs
+# 9.Ranking: top [k] experts with largest expected decrease in loss
 
 opt_parser <- OptionParser(option_list=option_list);
 opt <- parse_args(opt_parser);
@@ -67,7 +68,7 @@ if (FLAGS$master==1){
     policy_set <- seq(0, FLAGS$cost/ntrain, length.out=num_policy)
 } else if (FLAGS$master==4){
     policy_set <- seq(-FLAGS$cost/ntrain, FLAGS$cost/ntrain, length.out=num_policy)
-} else if (FLAGS$master %in% c(6,7,8)){
+} else if (FLAGS$master %in% c(6:9)){
     num_policy <- r_per_h+1
 }
 gamma <- sqrt(log(num_policy)/(ntrain*(FLAGS$cost)^2))
@@ -162,7 +163,7 @@ for (rep in c(1:20)){
             reg_tmp <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
             if (FLAGS$master==1){ 
                 objs <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_labels
-            } else if (FLAGS$master %in% c(4:8)){
+            } else if (FLAGS$master %in% c(4:9)){
                 objs <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_req_prob
             }
 
@@ -179,7 +180,7 @@ for (rep in c(1:20)){
             req_prop_tmp <- cum_labels/cum_accepts
             reg_tmp <- p_tmp * sqrt(log(cum_accepts+1)/(cum_accepts+1))
 
-            if(FLAGS$master %in% c(3:8) & req_prob[k_t] == 1){
+            if(FLAGS$master %in% c(3:9) & req_prob[k_t] == 1){
                 avail_h <- all_h[Ht[,k_t],]; 
                 req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
                 req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
@@ -205,8 +206,10 @@ for (rep in c(1:20)){
                     curr_rank <- which(order(-tmpreg+tmpobs)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
                 } else if (FLAGS$master==8){
                     curr_rank <- which(order(-reg_diff_obs)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
+                } else if (FLAGS$master==9){
+                    ex_reward <- (p_tmp*reg_diff_tmp) - FLAGS$cost/ntrain * req_prob;
+                    curr_rank <- which(order(-ex_reward)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
                 }
-
                 It <- which(runif(1) < cumsum(exp_w))[1]
                 action_t <- advice_t[It]
             }
@@ -251,7 +254,7 @@ for (rep in c(1:20)){
                 loss_t_policy[advice_t != as.numeric(action_t)] <- 0
                 exp_w <- exp_w * exp(-gamma*loss_t_policy/2); exp_w <- exp_w / sum(exp_w)
                 objs <- obj_tmp
-            } else if (FLAGS$master %in% c(4:8)){
+            } else if (FLAGS$master %in% c(4:9)){
                 if(action_t){
                     reg_tmp1 <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
                     obj_tmp1 <- p_tmp * reg_tmp1 + (FLAGS$cost/ntrain) * cum_req_prob
@@ -278,7 +281,7 @@ for (rep in c(1:20)){
             }
 
             Ht_sum_new <- sum(Ht[,k_t])
-            if(FLAGS$master %in% c(3:8) & Ht_sum_new < Ht_sum_old[k_t]){
+            if(FLAGS$master %in% c(3:9) & Ht_sum_new < Ht_sum_old[k_t]){
                 avail_h <- all_h[Ht[,k_t],]; 
                 req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
                 req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
