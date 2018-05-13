@@ -68,7 +68,7 @@ if (FLAGS$master==1){
 } else if (FLAGS$master==4){
     policy_set <- seq(-FLAGS$cost/ntrain, FLAGS$cost/ntrain, length.out=num_policy)
 } else if (FLAGS$master %in% c(6,7,8)){
-    num_policy <- r_per_h
+    num_policy <- r_per_h+1
 }
 gamma <- sqrt(log(num_policy)/(ntrain*(FLAGS$cost)^2))
 
@@ -150,7 +150,6 @@ for (rep in c(1:20)){
     last_cum_label <- 0
 
     for (i in seq_len(ntrain)){
-    for (i in c(2138:ntrain)){
         x_t <- trainX[i,]; y_t <- trainy[i]; k_t <- traink[i]; pred_t <- all_h %*% x_t
         cum_samples[k_t] <- cum_samples[k_t] +1
         if (i <= n_warmup || cum_accepts[k_t] <= n_warmup/r_per_h){
@@ -200,12 +199,12 @@ for (rep in c(1:20)){
                 } else if (FLAGS$master==5){
                     advice_t <- as.numeric(runif(1) < policy_set[,k_t])
                 } else if (FLAGS$master==6){
-                    curr_rank <- which(order(-reg_tmp)==k_t); advice_t <- as.numeric(c(1:r_per_h) >= curr_rank)
+                    curr_rank <- which(order(-reg_tmp)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
                 } else if (FLAGS$master==7){
                     tmpreg <- reg_tmp /sum(reg_tmp); tmpobs <- cum_labels / sum(cum_labels) 
-                    curr_rank <- which(order(-tmpreg+tmpobs)==k_t); advice_t <- as.numeric(c(1:r_per_h) >= curr_rank)
+                    curr_rank <- which(order(-tmpreg+tmpobs)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
                 } else if (FLAGS$master==8){
-                    curr_rank <- which(order(-reg_diff_obs)==k_t); advice_t <- as.numeric(c(1:r_per_h) >= curr_rank)
+                    curr_rank <- which(order(-reg_diff_obs)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
                 }
 
                 It <- which(runif(1) < cumsum(exp_w))[1]
