@@ -135,6 +135,7 @@ for (rep in c(1)){
 
     # -- book keeping
     cum_loss <- matrix(0,nrow=nh,ncol=r_per_h)
+    cum_loss_01 <- matrix(0,nrow=nh,ncol=r_per_h)
     Ht <- matrix(TRUE,nrow=nh,ncol=r_per_h); Ht_sum_old <- rep(nh, each=r_per_h)
     cum_samples <- cum_accepts  <- rep(0.5, r_per_h) # incoming unlabeled; passed on to slave; 
     last_cum_accepts  <- rep(0.5, r_per_h) # incoming unlabeled; passed on to slave; 
@@ -151,14 +152,20 @@ for (rep in c(1)){
     last_cum_label <- 0
 
     label_idx <- rep(0, ntrain)
+    req_prob_idx <- rep(0, ntrain)
+    region_idx <- rep(0,ntrain)
+    err_idx <- rep(0,ntrain)
+    accept_idx <- rep(0,ntrain)
 
     for (i in seq_len(ntrain)){
         x_t <- trainX[i,]; y_t <- trainy[i]; k_t <- traink[i]; pred_t <- all_h %*% x_t
         cum_samples[k_t] <- cum_samples[k_t] +1
+        region_idx[i] <- k_t
         if (i <= n_warmup || cum_accepts[k_t] <= n_warmup/r_per_h){
             cum_labels[k_t] <- cum_labels[k_t]+1
             cum_accepts[k_t] <- cum_accepts[k_t]+1
             cum_loss[,k_t] <- cum_loss[,k_t] + loss_func(pred_t,y_t,'logistic')/(M) # importance weighted cum_loss
+            cum_loss_01[,k_t] <- cum_loss_01[,k_t] + loss_func(pred_t,y_t,'misclass') # importance weighted cum_loss
             cum_req_prob[k_t] <- cum_req_prob[k_t] + req_prob[k_t]
 
             p_tmp <- cum_samples/sum(cum_samples)
@@ -176,7 +183,7 @@ for (rep in c(1)){
                 last_cum_accepts[k_t] <- cum_accepts[k_t]
             }
 
-            label_idx[i] <- 1
+            label_idx[i] <- 1; req_prob_idx[i] <- 1; err_idx[i] <- min(cum_loss_01[,k_t])/cum_accepts[k_t]; accept_idx[i] <- 1
 
         } else{
             p_tmp <- cum_samples/sum(cum_samples)
@@ -220,6 +227,7 @@ for (rep in c(1)){
 
             if (action_t){
                 cum_accepts[k_t] <- cum_accepts[k_t]+1
+                accept_idx[i] <- 1
 
                 pred_max <- max(pred_t[Ht[,k_t]])
                 pred_min <- min(pred_t[Ht[,k_t]])
@@ -231,6 +239,7 @@ for (rep in c(1)){
                 if (Q_t > 0){
                     cum_labels[k_t] <- cum_labels[k_t]+1; 
                     cum_loss[,k_t] <- cum_loss[,k_t] + loss_func(pred_t,y_t,'logistic')/(M*p_t) # importance weighted cum_loss
+                    cum_loss_01[,k_t] <- cum_loss_01[,k_t] + loss_func(pred_t,y_t,'misclass')/p_t # importance weighted cum_loss
                     min_err <- min((cum_loss[,k_t])[Ht[,k_t]])
                     T_t <- cum_accepts[k_t]
                     slack_t <- sqrt(T_t*log(T_t+1)) # a more aggresive slack term than IWAL paper
@@ -292,35 +301,21 @@ for (rep in c(1)){
                 req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
                 Ht_sum_old[k_t] <- Ht_sum_new
             }
+
+            req_prob_idx[i] <- req_prob[k_t]; err_idx[i] <- min(cum_loss_01[Ht[,k_t],k_t])/cum_accepts[k_t]
         }
 
         CUM_LABELS <- sum(cum_labels)
         if (i!= last_i & CUM_LABELS != last_cum_label & (i %% checkpoint ==0 || CUM_LABELS %% checkpoint == 0)){
-            last_i <-  i
-            last_cum_label <- CUM_LABELS
+            last_i <-  i; last_cum_label <- CUM_LABELS
             cat('num of rounds:',i, ', num of labels:',CUM_LABELS, '\n')
-
-            opt_Its <- rep(0,r_per_h)
-            for(r in c(1:r_per_h)){ opt_Its[r] <- (seq_len(nh)[Ht[,r]])[which.min((cum_loss[,r])[Ht[,r]])] }
-            curr_otb <- mul_otb(testX, testy, all_h, testk, opt_Its)
-            OTB_iwal <- rbind(OTB_iwal, c(i, CUM_LABELS, curr_otb))
         }
     }
-
-    opt_Its <- rep(0,r_per_h)
-    for(r in c(1:r_per_h)){ opt_Its[r] <- (seq_len(nh)[Ht[,r]])[which.min((cum_loss[,r])[Ht[,r]])] }
-    curr_otb <- mul_otb(testX, testy, all_h, testk, opt_Its)
-    OTB_iwal <- rbind(OTB_iwal, c(i, CUM_LABELS, curr_otb))
-    colnames(OTB_iwal) <- c('round','labels','loss_misclass','loss_logistic')
-
-    # save to file
-    opt2 <- as.list(FLAGS) ;opt2$datafolder <- NULL ;opt2$otb <- NULL ;opt2$help <- NULL ;opt2$out_directory <- NULL
-    basefilename <- paste0(paste0(names(opt2),'_',opt2), collapse = '_')
-    filename <- paste0(FLAGS$out_directory,'/',basefilename, '_otb_rep',rep,'.csv')
-    write.table(OTB_iwal,filename, sep = ',', row.names = FALSE)
 
     opt2 <- as.list(FLAGS) ;opt2$datafolder <- NULL ;opt2$otb <- NULL ;opt2$help <- NULL ;opt2$out_directory <- NULL
     basefilename <- paste0(paste0(names(opt2),'_',opt2), collapse = '_')
     filename <- paste0(FLAGS$out_directory,'/',basefilename, '_labelidx_rep',rep,'.csv')
-    write.table(label_idx,filename, sep = ',', row.names = FALSE)
+    towrite <- cbind(region_idx, accept_idx, label_idx, req_prob_idx, err_idx); colnames(towrite) <- c('k','A','Q','p','err')
+    write.table(towrite,filename, sep = ',', row.names = FALSE)
 }
+
