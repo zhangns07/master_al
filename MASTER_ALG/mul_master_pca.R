@@ -44,11 +44,12 @@ option_list <- list(make_option(c("-d", "--dataset"), type="character", default=
 # 5.Claudio's idea: each policy is a point in simplex, that corresponds to probability of passing samples on
 # 6.Ranking: top [k] experts with largest p_k * reg_k
 # 7.Ranking: top [k] experts with largest difference between reg / obs
-# 8.Ranking: top [k] experts with largest decrease in reg since last obs
+# 8.Ranking: top [k] experts with largest decrease in reg since last label, reg is 1/sqrt(tk)
 # 9.Ranking: top [k] experts with largest expected decrease in loss
 # 10.Ranking: top [k] experts with largest expected prob req
 # 11.Ranking: top [k] experts with largest error
-# 12.Ranking: top [k] experts with decrease in reg per label
+# 12.Ranking: top [k] experts with decrease in reg per label (1/sqrt(tk) / req_prob_k)
+# 13.Ranking: top [k] experts with decrease in min_err per label
 
 opt_parser <- OptionParser(option_list=option_list);
 opt <- parse_args(opt_parser);
@@ -71,11 +72,10 @@ if (FLAGS$master==1){
     policy_set <- seq(0, FLAGS$cost/ntrain, length.out=num_policy)
 } else if (FLAGS$master==4){
     policy_set <- seq(-FLAGS$cost/ntrain, FLAGS$cost/ntrain, length.out=num_policy)
-} else if (FLAGS$master %in% c(6:12)){
+} else if (FLAGS$master %in% c(6:13)){
     num_policy <- r_per_h+1
 }
-#gamma <- sqrt(log(num_policy)/(ntrain*(FLAGS$cost)^2))
-gamma <- sqrt(log(num_policy)/(ntrain))
+gamma <- sqrt(log(num_policy)/(ntrain*(FLAGS$cost)^2))
 
 for (rep in c(1:20)){
     opt2 <- as.list(FLAGS) ;opt2$datafolder <- NULL ;opt2$otb <- NULL ;opt2$help <- NULL ;opt2$out_directory <- NULL
@@ -133,7 +133,7 @@ for (rep in c(1:20)){
 
     # --  prepare a  holdout unlabeled set
     req_prob_X <- testX[1:min(10000,ntest),]; req_prob_k <- testk[1:min(10000,ntest)]
-    req_prob <- rep(1,r_per_h); min_err <- rep(1,r_per_h)
+    req_prob <- rep(1,r_per_h); min_err <- rep(1,r_per_h); last_min_err <- rep(1,r_per_h); dec_min_err <- rep(1,r_per_h)
     cum_req_prob <- rep(0,r_per_h)
     reg_diff_obs <- rep(0,r_per_h)
 
@@ -163,12 +163,14 @@ for (rep in c(1:20)){
             cum_loss[,k_t] <- cum_loss[,k_t] + loss_func(pred_t,y_t,'logistic')/(M) # importance weighted cum_loss
             cum_req_prob[k_t] <- cum_req_prob[k_t] + req_prob[k_t]
             min_err[k_t] <- min(cum_loss[,k_t])/cum_accepts[k_t]
+            dec_min_err[k_t] <- last_min_err[k_t] - min_err[k_t]
+            last_min_err[k_t] <- min_err[k_t]
 
             p_tmp <- cum_samples/sum(cum_samples)
             reg_tmp <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
             if (FLAGS$master==1){ 
                 objs <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_labels
-            } else if (FLAGS$master %in% c(4:12)){
+            } else if (FLAGS$master %in% c(4:13)){
                 objs <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_req_prob
             }
 
@@ -185,7 +187,7 @@ for (rep in c(1:20)){
             req_prop_tmp <- cum_labels/cum_accepts
             reg_tmp <- p_tmp * sqrt(log(cum_accepts+1)/(cum_accepts+1))
 
-            if(FLAGS$master %in% c(3:12) & req_prob[k_t] == 1){
+            if(FLAGS$master %in% c(3:13) & req_prob[k_t] == 1){
                 avail_h <- all_h[Ht[,k_t],]; 
                 req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
                 req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
@@ -222,6 +224,8 @@ for (rep in c(1:20)){
                     } else if (FLAGS$master==12){
                         dec_per_label <- (p_tmp*reg_diff_tmp) / req_prob;
                         curr_rank <- which(order(-dec_per_label)==k_t); 
+                    } else if (FLAGS$master==13){
+                        curr_rank <- which(order(-dec_min_err)==k_t); 
                     }
                     advice_t <- as.numeric(c(1:num_policy)-1 >= curr_rank)
                 }
@@ -247,6 +251,8 @@ for (rep in c(1:20)){
                     slack_t <- sqrt(T_t*log(T_t+1)) # a more aggresive slack term than IWAL paper
                     Ht[,k_t] <- (Ht[,k_t]  & cum_loss[,k_t] <= min_cum_err + slack_t)
                     min_err[k_t] <- min_cum_err/cum_accepts[k_t]
+                    dec_min_err[k_t] <- last_min_err[k_t] - min_err[k_t]
+                    last_min_err[k_t] <- min_err[k_t]
 
                     if(FLAGS$master==8){
                         p_tmp <- cum_samples/sum(cum_samples)
@@ -270,7 +276,7 @@ for (rep in c(1:20)){
                 loss_t_policy[advice_t != as.numeric(action_t)] <- 0
                 exp_w <- exp_w * exp(-gamma*loss_t_policy/2); exp_w <- exp_w / sum(exp_w)
                 objs <- obj_tmp
-            } else if (FLAGS$master %in% c(4:12)){
+            } else if (FLAGS$master %in% c(4:13)){
                 if(action_t){
                     reg_tmp1 <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
                     obj_tmp1 <- p_tmp * reg_tmp1 + (FLAGS$cost/ntrain) * cum_req_prob
@@ -297,7 +303,7 @@ for (rep in c(1:20)){
             }
 
             Ht_sum_new <- sum(Ht[,k_t])
-            if(FLAGS$master %in% c(3:12) & Ht_sum_new < Ht_sum_old[k_t]){
+            if(FLAGS$master %in% c(3:13) & Ht_sum_new < Ht_sum_old[k_t]){
                 avail_h <- all_h[Ht[,k_t],]; 
                 req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
                 req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
@@ -310,6 +316,7 @@ for (rep in c(1:20)){
             last_i <-  i
             last_cum_label <- CUM_LABELS
             cat('num of rounds:',i, ', num of labels:',CUM_LABELS, '\n')
+            cat(exp_w,'\n')
 
             opt_Its <- rep(0,r_per_h)
             for(r in c(1:r_per_h)){ opt_Its[r] <- (seq_len(nh)[Ht[,r]])[which.min((cum_loss[,r])[Ht[,r]])] }
@@ -330,3 +337,4 @@ for (rep in c(1:20)){
     filename <- paste0(FLAGS$out_directory,'/',basefilename, '_otb_rep',rep,'.csv')
     write.table(OTB_iwal,filename, sep = ',', row.names = FALSE)
 }
+
