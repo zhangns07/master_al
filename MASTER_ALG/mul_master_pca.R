@@ -48,6 +48,7 @@ option_list <- list(make_option(c("-d", "--dataset"), type="character", default=
 # 9.Ranking: top [k] experts with largest expected decrease in loss
 # 10.Ranking: top [k] experts with largest expected prob req
 # 11.Ranking: top [k] experts with largest error
+# 12.Ranking: top [k] experts with decrease in reg per label
 
 opt_parser <- OptionParser(option_list=option_list);
 opt <- parse_args(opt_parser);
@@ -70,7 +71,7 @@ if (FLAGS$master==1){
     policy_set <- seq(0, FLAGS$cost/ntrain, length.out=num_policy)
 } else if (FLAGS$master==4){
     policy_set <- seq(-FLAGS$cost/ntrain, FLAGS$cost/ntrain, length.out=num_policy)
-} else if (FLAGS$master %in% c(6:11)){
+} else if (FLAGS$master %in% c(6:12)){
     num_policy <- r_per_h+1
 }
 gamma <- sqrt(log(num_policy)/(ntrain*(FLAGS$cost)^2))
@@ -166,7 +167,7 @@ for (rep in c(1:20)){
             reg_tmp <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
             if (FLAGS$master==1){ 
                 objs <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_labels
-            } else if (FLAGS$master %in% c(4:11)){
+            } else if (FLAGS$master %in% c(4:12)){
                 objs <- p_tmp * reg_tmp + (FLAGS$cost/ntrain) * cum_req_prob
             }
 
@@ -183,7 +184,7 @@ for (rep in c(1:20)){
             req_prop_tmp <- cum_labels/cum_accepts
             reg_tmp <- p_tmp * sqrt(log(cum_accepts+1)/(cum_accepts+1))
 
-            if(FLAGS$master %in% c(3:11) & req_prob[k_t] == 1){
+            if(FLAGS$master %in% c(3:12) & req_prob[k_t] == 1){
                 avail_h <- all_h[Ht[,k_t],]; 
                 req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
                 req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
@@ -216,6 +217,9 @@ for (rep in c(1:20)){
                     curr_rank <- which(order(-req_prob)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
                 } else if (FLAGS$master==11){
                     curr_rank <- which(order(-min_err)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
+                } else if (FLAGS$master==12){
+                    dec_per_label <- (p_tmp*reg_diff_tmp) / req_prob;
+                    curr_rank <- which(order(-dec_per_label)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
                 }
 
                 It <- which(runif(1) < cumsum(exp_w))[1]
@@ -263,7 +267,7 @@ for (rep in c(1:20)){
                 loss_t_policy[advice_t != as.numeric(action_t)] <- 0
                 exp_w <- exp_w * exp(-gamma*loss_t_policy/2); exp_w <- exp_w / sum(exp_w)
                 objs <- obj_tmp
-            } else if (FLAGS$master %in% c(4:11)){
+            } else if (FLAGS$master %in% c(4:12)){
                 if(action_t){
                     reg_tmp1 <- sqrt(log(1+cum_accepts)/(cum_accepts+1)) 
                     obj_tmp1 <- p_tmp * reg_tmp1 + (FLAGS$cost/ntrain) * cum_req_prob
@@ -290,7 +294,7 @@ for (rep in c(1:20)){
             }
 
             Ht_sum_new <- sum(Ht[,k_t])
-            if(FLAGS$master %in% c(3:11) & Ht_sum_new < Ht_sum_old[k_t]){
+            if(FLAGS$master %in% c(3:12) & Ht_sum_new < Ht_sum_old[k_t]){
                 avail_h <- all_h[Ht[,k_t],]; 
                 req_prob_Xk <- req_prob_X[req_prob_k==k_t,]
                 req_prob[k_t]  <- get_req_prob(avail_h,req_prob_Xk , M)
