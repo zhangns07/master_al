@@ -74,7 +74,8 @@ if (FLAGS$master==1){
 } else if (FLAGS$master %in% c(6:12)){
     num_policy <- r_per_h+1
 }
-gamma <- sqrt(log(num_policy)/(ntrain*(FLAGS$cost)^2))
+#gamma <- sqrt(log(num_policy)/(ntrain*(FLAGS$cost)^2))
+gamma <- sqrt(log(num_policy)/(ntrain))
 
 for (rep in c(1:20)){
     opt2 <- as.list(FLAGS) ;opt2$datafolder <- NULL ;opt2$otb <- NULL ;opt2$help <- NULL ;opt2$out_directory <- NULL
@@ -203,25 +204,27 @@ for (rep in c(1:20)){
                     advice_t <- as.numeric((p_tmp*reg_diff_tmp)[k_t] - FLAGS$cost/ntrain * (req_prob)[k_t] > policy_set)
                 } else if (FLAGS$master==5){
                     advice_t <- as.numeric(runif(1) < policy_set[,k_t])
-                } else if (FLAGS$master==6){
-                    curr_rank <- which(order(-reg_tmp)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
-                } else if (FLAGS$master==7){
-                    tmpreg <- reg_tmp /sum(reg_tmp); tmpobs <- cum_labels / sum(cum_labels) 
-                    curr_rank <- which(order(-tmpreg+tmpobs)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
-                } else if (FLAGS$master==8){
-                    curr_rank <- which(order(-reg_diff_obs)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
-                } else if (FLAGS$master==9){
-                    ex_reward <- (p_tmp*reg_diff_tmp) - FLAGS$cost/ntrain * req_prob;
-                    curr_rank <- which(order(-ex_reward)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
-                } else if (FLAGS$master==10){
-                    curr_rank <- which(order(-req_prob)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
-                } else if (FLAGS$master==11){
-                    curr_rank <- which(order(-min_err)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
-                } else if (FLAGS$master==12){
-                    dec_per_label <- (p_tmp*reg_diff_tmp) / req_prob;
-                    curr_rank <- which(order(-dec_per_label)==k_t); advice_t <- as.numeric(c(0:r_per_h) >= curr_rank)
+                } else {
+                    if (FLAGS$master==6){
+                        curr_rank <- which(order(-reg_tmp)==k_t); 
+                    } else if (FLAGS$master==7){
+                        tmpreg <- reg_tmp /sum(reg_tmp); tmpobs <- cum_labels / sum(cum_labels) 
+                        curr_rank <- which(order(-tmpreg+tmpobs)==k_t); 
+                    } else if (FLAGS$master==8){
+                        curr_rank <- which(order(-reg_diff_obs)==k_t); 
+                    } else if (FLAGS$master==9){
+                        ex_reward <- (p_tmp*reg_diff_tmp) - FLAGS$cost/ntrain * req_prob;
+                        curr_rank <- which(order(-ex_reward)==k_t); 
+                    } else if (FLAGS$master==10){
+                        curr_rank <- which(order(-req_prob)==k_t); 
+                    } else if (FLAGS$master==11){
+                        curr_rank <- which(order(-min_err)==k_t); 
+                    } else if (FLAGS$master==12){
+                        dec_per_label <- (p_tmp*reg_diff_tmp) / req_prob;
+                        curr_rank <- which(order(-dec_per_label)==k_t); 
+                    }
+                    advice_t <- as.numeric(c(1:num_policy)-1 >= curr_rank)
                 }
-
                 It <- which(runif(1) < cumsum(exp_w))[1]
                 action_t <- advice_t[It]
             }
