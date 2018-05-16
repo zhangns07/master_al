@@ -40,7 +40,9 @@ option_list <- list(make_option(c("-d", "--dataset"), type="character", default=
                     make_option(c("-c", "--cost"), type="numeric", default=1,
                                 help="label request cost"),
                     make_option(c("-m", "--master"), type="numeric", default=1,
-                                help="types of master algorithm. ")
+                                help="types of master algorithm. "),
+                    make_option(c("-v", "--timevar"), type="logical", default=FALSE,
+                                help="whether time varying learning rate")
                     )
 # Master
 opt_parser <- OptionParser(option_list=option_list);
@@ -117,7 +119,7 @@ for (rep in c(1:20)){
     cum_samples <- cum_accepts  <- rep(0.5, r_per_h) # incoming unlabeled; passed on to slave; 
     cum_labels <- rep(0, r_per_h)
     exp_w <- rep(1, num_policy); exp_w <- exp_w / sum(exp_w)
-    gamma <- sqrt(log(num_policy)/(ntrain*(FLAGS$cost)^2))
+    #gamma <- sqrt(log(num_policy)/(ntrain*(FLAGS$cost)^2))
 
     checkpoint <- min(100,floor(nT / (100*10)) * 100)
     if (checkpoint==0){checkpoint <- 25}
@@ -206,6 +208,11 @@ for (rep in c(1:20)){
 
             # Prob of being observed
             P_w <- rep(0,num_policy); P_w[advice_t==0] <- 1; P_w[advice_t==1] <- sum(exp_w[advice_t==1])
+            if(FLAGS$timevar){
+                gamma_t <- sqrt(log(num_policy)/(i*(FLAGS$cost)^2))
+            } else {
+                gamma_t <- sqrt(log(num_policy)/(ntrain*(FLAGS$cost)^2))
+            }
 
             # if action_t=1,  update both all experts; if action_t=0,  update only experts that not pass
             if (action_t==1){
@@ -214,12 +221,12 @@ for (rep in c(1:20)){
                 loss_0 <- sum(objs)
 
                 loss_t <- rep(0, num_policy); loss_t[advice_t==0] <- loss_0; loss_t[advice_t==1] <- loss_1; loss_t <- loss_t/P_w
-                exp_w <- exp_w * exp(-gamma*loss_t); exp_w <- exp_w / sum(exp_w)
+                exp_w <- exp_w * exp(-gamma_t*loss_t); exp_w <- exp_w / sum(exp_w)
                 objs <- obj_tmp
             } else {
                 loss_0 <- sum(objs)
                 loss_t <- rep(0, num_policy); loss_t[advice_t==0] <- loss_0; loss_t[advice_t==1] <- 0; loss_t <- loss_t/P_w
-                exp_w <- exp_w * exp(-gamma*loss_t); exp_w <- exp_w / sum(exp_w)
+                exp_w <- exp_w * exp(-gamma_t*loss_t); exp_w <- exp_w / sum(exp_w)
             }
 
             Ht_sum_new <- sum(Ht[,k_t])
