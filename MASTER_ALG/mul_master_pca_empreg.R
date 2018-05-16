@@ -63,6 +63,7 @@ num_policy <- r_per_h+1
 
 for (rep in c(1:20)){
     opt2 <- as.list(FLAGS) ;opt2$datafolder <- NULL ;opt2$otb <- NULL ;opt2$help <- NULL ;opt2$out_directory <- NULL
+    if(!opt2$timevar){opt2$timevar <- NULL}
     basefilename <- paste0(paste0(names(opt2),'_',opt2), collapse = '_')
     filename <- paste0(FLAGS$out_directory,'/',basefilename, '_obj_empreg_otb_rep',rep,'.csv')
     if (file.exists(filename)){next}
@@ -256,6 +257,7 @@ for (rep in c(1:20)){
 
     # save to file
     opt2 <- as.list(FLAGS) ;opt2$datafolder <- NULL ;opt2$otb <- NULL ;opt2$help <- NULL ;opt2$out_directory <- NULL
+    if(!opt2$timevar){opt2$timevar <- NULL}
     basefilename <- paste0(paste0(names(opt2),'_',opt2), collapse = '_')
     filename <- paste0(FLAGS$out_directory,'/',basefilename, '_obj_empreg_otb_rep',rep,'.csv')
     write.table(OTB_iwal,filename, sep = ',', row.names = FALSE)
