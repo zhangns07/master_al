@@ -84,12 +84,6 @@ for (rep in c(1:20)){
     all_h <- gen_all_h(num_dim=ncol(trainX), num_base_models=FLAGS$basemodel, scales)#, h0=h0)
     nh <- nrow(all_h)
 
-    # -- generate uniform sample from simplex as policies
-    if (FLAGS$master==5){
-        tmp_set <- matrix(-log(runif(num_policy*r_per_h)),ncol=r_per_h)
-        policy_set <- t(apply(tmp_set, 1, function(x){x/sum(x)}))
-    }
-
     # --  When models' norm scales, scales thre as well.
     X_norm <- apply(trainX,1,function(x){sqrt(sum(x^2))})
     max_x_norm <- quantile(X_norm,0.95)
