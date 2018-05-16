@@ -64,7 +64,7 @@ num_policy <- r_per_h+1
 for (rep in c(1:20)){
     opt2 <- as.list(FLAGS) ;opt2$datafolder <- NULL ;opt2$otb <- NULL ;opt2$help <- NULL ;opt2$out_directory <- NULL
     basefilename <- paste0(paste0(names(opt2),'_',opt2), collapse = '_')
-    filename <- paste0(FLAGS$out_directory,'/',basefilename, '_otb_rep',rep,'.csv')
+    filename <- paste0(FLAGS$out_directory,'/',basefilename, '_obj_empreg_otb_rep',rep,'.csv')
     if (file.exists(filename)){next}
 
     set.seed(rep); shuffle <- sample(nrow(X),nrow(X),replace = FALSE)
@@ -215,11 +215,13 @@ for (rep in c(1:20)){
                 loss_0 <- sum(objs)
 
                 loss_t <- rep(0, num_policy); loss_t[advice_t==0] <- loss_0; loss_t[advice_t==1] <- loss_1; loss_t <- loss_t/P_w
+                loss_t[P_w==0] <- 0
                 exp_w <- exp_w * exp(-gamma_t*loss_t); exp_w <- exp_w / sum(exp_w)
                 objs <- obj_tmp
             } else {
                 loss_0 <- sum(objs)
-                loss_t <- rep(0, num_policy); loss_t[advice_t==0] <- loss_0; loss_t[advice_t==1] <- 0; loss_t <- loss_t/P_w
+                loss_t <- rep(0, num_policy); loss_t[advice_t==0] <- loss_0;  loss_t <- loss_t/P_w; loss_t[advice_t==1] <- 0
+                loss_t[P_w==0] <- 0
                 exp_w <- exp_w * exp(-gamma_t*loss_t); exp_w <- exp_w / sum(exp_w)
             }
 
